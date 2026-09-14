@@ -59,4 +59,5 @@ plt.legend(fontsize=10)
 plt.grid(True, linestyle="--", alpha=0.6)
 plt.tight_layout()
 
+plt.savefig("tehotasot_plot.png", dpi=300, bbox_inches='tight')
 plt.show()

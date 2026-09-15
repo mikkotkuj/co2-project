@@ -3,61 +3,68 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
-# 1. Ladataan Ground Truth -data
 gt_df = pd.read_csv("data/GT_data.csv")
 
 X = gt_df[["co2_ppm", "ilmamaara_ls"]]
 y = gt_df["henkilot"]
 
-# 2. Opetetaan malli
 model = LinearRegression()
 model.fit(X, y)
 
-# 3. Luodaan tasainen CO2-akseli ennusteille
-co2_range = np.linspace(gt_df["co2_ppm"].min(), gt_df["co2_ppm"].max(), 100)
 
-# Määritetään ilmanvaihdon tehotasot ja niitä vastaavat ilmamäärät (L/s)
-tehotasot = {
-    "Teho I (~57 L/s, <80 dB)": 57,
-    "Teho II (~71 L/s, 80–81 dB)": 71,
-    "Teho III (~91–100 L/s, >82 dB)": 91,
-}
+# Luodaan ruudukko CO2- ja ilmamääräarvoista
+co2_range = np.linspace(
+    gt_df["co2_ppm"].min(),
+    gt_df["co2_ppm"].max(),
+    50
+)
 
-# 4. Piirretään kuvaaja
-plt.figure(figsize=(9, 6))
+ilmamaara_range = np.linspace(
+    gt_df["ilmamaara_ls"].min(),
+    gt_df["ilmamaara_ls"].max(),
+    50
+)
 
-# Piirretään toteutuneet GT-mittauspisteet
-plt.scatter(
+CO2, ILMAMAARA = np.meshgrid(co2_range, ilmamaara_range)
+
+# Muutetaan ruudukko mallin tarvitsemaksi DataFrameksi
+X_plot = pd.DataFrame({
+    "co2_ppm": CO2.ravel(),
+    "ilmamaara_ls": ILMAMAARA.ravel()
+})
+
+# Ennusteet
+HENKILOT = model.predict(X_plot).reshape(CO2.shape)
+
+
+# 3D-kuvaaja
+fig = plt.figure(figsize=(10, 7))
+ax = fig.add_subplot(111, projection="3d")
+
+# Mallin ennustama pinta
+ax.plot_surface(
+    CO2,
+    ILMAMAARA,
+    HENKILOT,
+    alpha=0.5
+)
+
+# Oikeat mittauspisteet
+ax.scatter(
     gt_df["co2_ppm"],
-    y,
-    color="blue",
+    gt_df["ilmamaara_ls"],
+    gt_df["henkilot"],
     s=40,
-    zorder=5,
-    label="GT-datapisteet",
+    label="GT-mittaukset"
 )
 
-# Piirretään jokaiselle tehotasolle oma ennustesuoransa
-varit = ["green", "orange", "red"]
-for (nimi, q_arvo), vari in zip(tehotasot.items(), varit):
-    X_plot = pd.DataFrame({"co2_ppm": co2_range, "ilmamaara_ls": q_arvo})
-    y_pred = model.predict(X_plot)
+ax.set_xlabel("CO₂ (ppm)")
+ax.set_ylabel("Ilmamäärä (L/s)")
+ax.set_zlabel("Henkilömäärä")
 
-    plt.plot(
-        co2_range,
-        y_pred,
-        color=vari,
-        linewidth=2,
-        label=f"Mallin ennuste: {nimi}",
-    )
+ax.set_title("Lineaarisen regressiomallin ennuste")
 
-plt.xlabel("CO2 (ppm)", fontsize=12)
-plt.ylabel("Henkilömäärä", fontsize=12)
-plt.title(
-    "Linear Regression: CO2 vs Henkilömäärä eri IV-tehotasoilla", fontsize=14
-)
-plt.legend(fontsize=10)
-plt.grid(True, linestyle="--", alpha=0.6)
 plt.tight_layout()
 
-plt.savefig("tehotasot_plot.png", dpi=300, bbox_inches='tight')
+plt.savefig("3d plot.png")
 plt.show()

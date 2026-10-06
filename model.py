@@ -1,6 +1,13 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import RepeatedKFold, cross_val_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+
 
 gt_df = pd.read_csv("data/GT_data_fullv2.csv")
 
@@ -28,4 +35,94 @@ plt.title("CO₂ vs. Number of People")
 plt.legend()
 plt.grid(True)
 plt.savefig("data/model.png")
+
+
+""" 
+Stage 2 Model
+"""
+
+# Physical model: N = Q * (C - C_out) / G
+C_OUT = 400 # outdoor CO2 ppm, with 0 people in the room
+X_phys = pd.DataFrame(
+    {"co2_x_flow": gt_df["ilmamaara_ls"] * (gt_df["co2_ppm"] - C_OUT)}
+)
+
+X_phys_train = X_phys.loc[X_train.index]
+X_phys_val = X_phys.loc[X_val.index]
+X_phys_test = X_phys.loc[X_test.index]
+
+m1 = LinearRegression()
+m2 = LinearRegression()
+
+m1.fit(X_train, y_train)
+m2.fit(X_phys_train, y_train)
+
+cv = RepeatedKFold(n_splits=5, n_repeats=20, random_state=None)
+X_dev = pd.concat([X_train, X_val])
+X_phys_dev = pd.concat([X_phys_train, X_phys_val])
+y_dev = pd.concat([y_train, y_val])
+
+ 
+ 
+def cv_rmse(model, X_dev_, y_dev_):
+    scores = cross_val_score(model, X_dev_, y_dev_, cv=cv,
+                             scoring="neg_root_mean_squared_error")
+    return -scores.mean()
+ 
+ 
+results = pd.DataFrame(
+    {
+        "model": ["M1 linear (CO2, airflow)",
+                  "M2 linear airflow*(CO2-400)"],
+        "train MSE": [mean_squared_error(y_train, m1.predict(X_train)),
+                      mean_squared_error(y_train, m2.predict(X_phys_train))],
+        "val MSE": [mean_squared_error(y_val, m1.predict(X_val)),
+                    mean_squared_error(y_val, m2.predict(X_phys_val))],
+        "CV RMSE": [cv_rmse(m1, X_dev, y_dev),
+                    cv_rmse(m2, X_phys_dev, y_dev)],
+    }
+)
+results["val RMSE"] = results["val MSE"] ** 0.5
+print(results.round(3).to_string(index=False))
+ 
+# Final model: M2 -> test error (test set used only here)
+test_pred = m2.predict(X_phys_test)
+test_mse = mean_squared_error(y_test, test_pred)
+print("Test MSE:", round(test_mse, 3), "RMSE:", round(test_mse ** 0.5, 3))
+print("Test within +-1 person after rounding:",
+      np.mean(np.abs(np.round(test_pred) - y_test) <= 1))
+print("M2: slope", m2.coef_[0], "intercept", m2.intercept_,
+      "-> CO2 per person (L/h):", 3600 / (m2.coef_[0] * 1e6))
+ 
+# Plot 2: CO2 vs. People for the three fan levels
+plt.figure(figsize=(5.2, 3.3))
+for level, group in gt_df.groupby("ilmanvaihdon_teho"):
+    plt.scatter(group["co2_ppm"], group["henkilot"], s=14,
+                label=f"Fan level {level}")
+plt.xlabel("CO₂ (ppm)")
+plt.ylabel("Number of people")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("data/co2_vs_people.png", dpi=200)
+ 
+# Plot 3: predicted vs. true for the three models
+fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.6), sharey=True)
+for ax, title, model, (Xa, Xb, Xc) in zip(
+    axes,
+    ["M1", "M2"],
+    [m1, m2],
+    [(X_train, X_val, X_test),
+     (X_phys_train, X_phys_val, X_phys_test)],
+):
+    ax.scatter(y_train, model.predict(Xa), s=12, label="Train")
+    ax.scatter(y_val, model.predict(Xb), s=12, label="Validation")
+    ax.plot([0, 42], [0, 42], "k--", lw=0.8)
+    ax.set_title(title, fontsize=9)
+    ax.set_xlabel("True number of people")
+    ax.grid(True)
+axes[0].set_ylabel("Predicted")
+axes[0].legend(fontsize=7)
+plt.tight_layout()
+plt.savefig("data/pred_vs_true.png", dpi=200)
 plt.show()
